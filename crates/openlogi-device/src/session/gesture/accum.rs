@@ -2,9 +2,10 @@
 //! holds the raw-XY stream, the button edges and gestures that follow, and
 //! which held wheel-hold button the raw wheel belongs to.
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU8;
 
-use openlogi_core::binding::{ButtonId, GestureDirection, SwipeAccumulator};
+use openlogi_core::binding::{ButtonId, GestureDirection, RepeatDistances, SwipeAccumulator};
 use tokio::sync::mpsc;
 use tracing::{debug, trace};
 
@@ -43,9 +44,16 @@ enum HoldState {
     },
 }
 
-/// Begin a hold for `cid`, its swipe accumulator started fresh.
-fn begin_hold(cid: u16, button: ButtonId, overlap: bool, skip_first_raw_xy: bool) -> HoldState {
-    let mut swipe = SwipeAccumulator::default();
+/// Begin a hold for `cid`, its swipe accumulator started fresh and repeating at
+/// `repeat`, the distances its button's bindings want.
+fn begin_hold(
+    cid: u16,
+    button: ButtonId,
+    repeat: RepeatDistances,
+    overlap: bool,
+    skip_first_raw_xy: bool,
+) -> HoldState {
+    let mut swipe = SwipeAccumulator::with_repeat_distances(repeat);
     swipe.begin();
     HoldState::Holding {
         cid,
@@ -72,6 +80,19 @@ pub(super) struct CaptureAccum {
     /// Diverted standard-button and wheel-hold CIDs held in the last event,
     /// in press order.
     buttons_down: Vec<u16>,
+    /// How far each gesture button's swipes travel before repeating, from the
+    /// session's [`CaptureSpec`]. Buttons not listed use the default.
+    repeat: BTreeMap<ButtonId, RepeatDistances>,
+}
+
+impl CaptureAccum {
+    /// An idle accumulator whose holds repeat at `repeat`.
+    pub(super) fn with_repeat(repeat: BTreeMap<ButtonId, RepeatDistances>) -> Self {
+        Self {
+            repeat,
+            ..Self::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +196,7 @@ impl CaptureAccum {
                             Some(&(cid, button)) => begin_hold(
                                 cid,
                                 button,
+                                self.repeat.get(&button).cloned().unwrap_or_default(),
                                 held.len() > 1,
                                 !self.gestures_down.contains(&cid),
                             ),

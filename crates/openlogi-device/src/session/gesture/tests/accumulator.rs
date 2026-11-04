@@ -1,5 +1,9 @@
 //! The capture accumulator: presses, taps, swipes and raw XY across the gesture sources.
 
+use std::collections::BTreeMap;
+
+use openlogi_core::binding::{Action, RepeatDistances};
+
 use super::*;
 
 const GESTURE: &[u16] = &[reprog_controls::GESTURE_BUTTON_CID];
@@ -902,4 +906,65 @@ fn raw_wheel_that_cannot_be_attributed_or_scaled_is_dropped() {
         &tx,
     );
     assert_eq!(held_wheel(&mut rx), []);
+}
+
+/// Everything `acc` emitted for a hold that raw-XY `moves` (x, y) were fed to,
+/// as the gestures a bound action would run.
+fn swipe_gestures(mut acc: CaptureAccum, moves: &[(i16, i16)]) -> Vec<CapturedInput> {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    handle_reprog(&mut acc, press(), GESTURE, &[], &[], &tx);
+    acc.backdate_hold_for_test();
+    stale_report(&mut acc, &tx);
+    for &(dx, dy) in moves {
+        handle_reprog(
+            &mut acc,
+            RawControlEvent::RawXy { dx, dy },
+            GESTURE,
+            &[],
+            &[],
+            &tx,
+        );
+    }
+    std::iter::from_fn(|| next_gesture(&mut rx).ok()).collect()
+}
+
+#[test]
+fn a_volume_binding_repeats_the_swipe_every_threshold_of_drag() {
+    let volume = BTreeMap::from([
+        (GestureDirection::Up, Action::VolumeUp),
+        (GestureDirection::Down, Action::VolumeDown),
+    ]);
+    let repeat = BTreeMap::from([(
+        ButtonId::GestureButton,
+        RepeatDistances::for_bindings(&volume),
+    )]);
+
+    let gestures = swipe_gestures(
+        CaptureAccum::with_repeat(repeat),
+        &[(0, -60), (0, -50), (0, -50), (0, 60)],
+    );
+
+    let button = ButtonId::GestureButton;
+    assert_eq!(
+        gestures,
+        [
+            CapturedInput::Gesture(button, GestureDirection::Up),
+            CapturedInput::Gesture(button, GestureDirection::Up),
+            CapturedInput::Gesture(button, GestureDirection::Up),
+            CapturedInput::Gesture(button, GestureDirection::Down),
+        ]
+    );
+}
+
+#[test]
+fn a_swipe_bound_to_anything_else_fires_once_over_the_same_drag() {
+    let gestures = swipe_gestures(CaptureAccum::default(), &[(0, -60), (0, -50), (0, -50)]);
+
+    assert_eq!(
+        gestures,
+        [CapturedInput::Gesture(
+            ButtonId::GestureButton,
+            GestureDirection::Up
+        )]
+    );
 }

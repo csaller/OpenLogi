@@ -1,0 +1,30 @@
+# Owner: openlogi_core::binding::Action::repeats_with_distance — which actions
+# a held motion keeps firing for every stretch of travel (volume), instead of
+# once per gesture. The thumb wheel and the gesture button's swipe both ask it.
+id: core-repeats-with-distance-owner
+language: rust
+severity: error
+message: Whether an action repeats with held travel comes from Action::repeats_with_distance (openlogi-core binding/action.rs); call it instead of matching VolumeUp and VolumeDown together here.
+note: |
+  The thumb-wheel dispatcher kept a private copy of this test; the swipe
+  repeat distance needed the same answer. See "Single source of truth" in
+  AGENTS.md.
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/openlogi-core/src/binding/action.rs
+  - "**/tests.rs"
+  - "**/tests/**"
+rule:
+  any:
+    # A match arm, `if let`, or `let` pattern: the or-pattern itself.
+    - all:
+        - kind: or_pattern
+        - not:
+            inside:
+              kind: or_pattern
+        - regex: '(?s)Action::VolumeUp\b.*Action::VolumeDown\b|Action::VolumeDown\b.*Action::VolumeUp\b'
+    # `matches!` keeps its pattern as unparsed tokens.
+    - all:
+        - kind: macro_invocation
+        - regex: '(?s)^matches!\s*[\(\[\{].*(Action::VolumeUp\b.*\|.*Action::VolumeDown\b|Action::VolumeDown\b.*\|.*Action::VolumeUp\b)'

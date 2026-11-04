@@ -162,7 +162,7 @@ impl WheelDirection {
         }
 
         let threshold = next_binding.sensitivity.action_threshold();
-        let (output, last_fired) = if is_repeatable(action) {
+        let (output, last_fired) = if action.repeats_with_distance() {
             // Volume actions track accumulated distance without the discrete-action cooldown.
             increments += magnitude;
             // Bound synchronous work even when one report spans many thresholds.
@@ -197,11 +197,6 @@ impl WheelDirection {
         };
         output
     }
-}
-
-/// Only volume actions repeat with thumb-wheel distance.
-fn is_repeatable(action: &Action) -> bool {
-    matches!(action, Action::VolumeUp | Action::VolumeDown)
 }
 
 /// Mutually exclusive state for one physical wheel direction.
