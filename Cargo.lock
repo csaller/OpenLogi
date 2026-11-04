@@ -5536,6 +5536,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "opener",
  "openlogi-agent-core",
+ "openlogi-camera",
  "openlogi-core",
  "openlogi-device",
  "openlogi-fixture",

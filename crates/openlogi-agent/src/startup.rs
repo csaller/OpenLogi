@@ -64,6 +64,7 @@ pub(crate) async fn bootstrap(config: Config) -> Option<Core> {
     // the IPC server (which the GUI polls); the janitor turns it back off.
     let event_monitor = Arc::new(EventMonitor::default());
     tokio::spawn(Arc::clone(&event_monitor).run_idle_janitor());
+    tokio::spawn(run_lighting_reassert(Arc::clone(&orchestrator)));
 
     // Pairing runs in the agent (it owns device I/O); the GUI drives it over IPC.
     let pairing = Arc::new(pairing::PairingManager::new(
@@ -88,6 +89,22 @@ pub(crate) async fn bootstrap(config: Config) -> Option<Core> {
         ring_haptics,
         demand,
     })
+}
+
+/// How often [`run_lighting_reassert`] re-writes keyboard colours — inside the
+/// ~20 s window after which G-series firmware reclaims its LEDs (#1000).
+const LIGHTING_REASSERT_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Re-assert lighting colours for as long as the agent runs. Only a timer can
+/// catch a keyboard that reverts while it stays connected and online.
+async fn run_lighting_reassert(orchestrator: Arc<Mutex<Orchestrator>>) {
+    let mut ticker = tokio::time::interval(LIGHTING_REASSERT_INTERVAL);
+    // A machine resuming from sleep must not replay every tick it missed.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        orchestrator.lock().await.reassert_lighting();
+    }
 }
 
 fn spawn_ipc_server(

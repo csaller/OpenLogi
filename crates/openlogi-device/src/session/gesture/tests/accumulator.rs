@@ -673,3 +673,35 @@ fn a_dpi_button_re_presses_after_a_release() {
         "press → release → press emits exactly three lifecycle edges"
     );
 }
+
+#[test]
+fn a_held_swipe_keeps_emitting_repeats_as_the_drag_continues() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut acc = CaptureAccum::default();
+    let raw = |dy| RawControlEvent::RawXy { dx: 0, dy };
+
+    handle_reprog(&mut acc, press(), GESTURE, &[], &[], &tx);
+    acc.backdate_hold_for_test();
+    for event in [raw(-60), raw(-50), raw(-50), raw(50)] {
+        handle_reprog(&mut acc, event, GESTURE, &[], &[], &tx);
+    }
+
+    let gestures: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|input| {
+            matches!(
+                input,
+                CapturedInput::Gesture(..) | CapturedInput::GestureRepeat(..)
+            )
+        })
+        .collect();
+    let button = ButtonId::GestureButton;
+    assert_eq!(
+        gestures,
+        [
+            CapturedInput::Gesture(button, GestureDirection::Up),
+            CapturedInput::GestureRepeat(button, GestureDirection::Up),
+            CapturedInput::GestureRepeat(button, GestureDirection::Up),
+            CapturedInput::GestureRepeat(button, GestureDirection::Down),
+        ]
+    );
+}

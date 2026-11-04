@@ -109,9 +109,16 @@ pub(super) fn sidebar_action(
         .flex_1()
 }
 
-pub(super) fn route_label(route: Option<&DeviceRoute>) -> String {
+/// Connection label for a device reached by `route`. `receiver_product_id`
+/// tells a Lightspeed dongle apart from Unifying, which share one route type.
+pub(super) fn route_label(route: Option<&DeviceRoute>, receiver_product_id: Option<u16>) -> String {
     match route {
         Some(DeviceRoute::Bolt { .. }) => tr!("device.bolt_receiver").to_string(),
+        Some(DeviceRoute::Unifying { .. })
+            if receiver_product_id.is_some_and(openlogi_core::hid::is_lightspeed_receiver) =>
+        {
+            tr!("device.lightspeed_receiver").to_string()
+        }
         Some(DeviceRoute::Unifying { .. }) => tr!("device.unifying_receiver").to_string(),
         Some(DeviceRoute::Direct { .. } | DeviceRoute::RawHid { .. }) => {
             tr!("device.direct_connection").to_string()

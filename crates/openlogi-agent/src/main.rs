@@ -17,6 +17,7 @@
 
 mod autostart;
 mod binary_watch;
+mod camera_controls;
 mod lifecycle;
 mod logging;
 mod overlay;

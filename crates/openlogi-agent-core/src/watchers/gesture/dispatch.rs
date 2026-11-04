@@ -171,6 +171,19 @@ impl InputDispatcher {
                     debug!(key, %button, ?direction, "gesture with no binding — ignored");
                 }
             }
+            CapturedInput::GestureRepeat(button, direction) => {
+                let Some(press) = self.gesture_presses.get(session, button) else {
+                    return;
+                };
+                if let Some(action) = plan
+                    .gesture_bindings
+                    .get(&button)
+                    .and_then(|map| map.get(&direction))
+                    .filter(|action| action.repeats_on_drag())
+                {
+                    self.outputs.actions.try_dispatch_while_pressed(press, action);
+                }
+            }
             CapturedInput::ButtonDown(button) => {
                 // A raw-XY gesture source owns its click/swipe map; its physical
                 // lifecycle is still tracked, but it must not also fire the

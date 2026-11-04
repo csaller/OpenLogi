@@ -129,16 +129,21 @@ fn connection_icon_matches_route() {
         ..DeviceTransports::default()
     };
     assert_eq!(
-        connection_icon_path(Some(&bolt), None),
+        connection_icon_path(Some(&bolt), None, None),
         "action-icons/bolt.svg"
     );
     assert_eq!(
-        connection_icon_path(Some(&uni), None),
+        connection_icon_path(Some(&uni), None, None),
         "action-icons/unifying.svg"
+    );
+    // A Lightspeed dongle is routed as Unifying; its pid picks its own mark.
+    assert_eq!(
+        connection_icon_path(Some(&uni), Some(0xc547), None),
+        "action-icons/lightspeed.svg"
     );
     // Direct + radio-less firmware = the cable is the only possible link.
     assert_eq!(
-        connection_icon_path(Some(&direct), Some(&wired)),
+        connection_icon_path(Some(&direct), None, Some(&wired)),
         "action-icons/usb.svg"
     );
     // eQuad is receiver-only, so an equad-only table on a *direct* route
@@ -148,31 +153,31 @@ fn connection_icon_matches_route() {
         ..DeviceTransports::default()
     };
     assert_eq!(
-        connection_icon_path(Some(&direct), Some(&equad_only)),
+        connection_icon_path(Some(&direct), None, Some(&equad_only)),
         "action-icons/usb.svg"
     );
     // An all-false table is "unknown", not "wired".
     assert_eq!(
-        connection_icon_path(Some(&direct), Some(&DeviceTransports::default())),
+        connection_icon_path(Some(&direct), None, Some(&DeviceTransports::default())),
         "action-icons/bluetooth.svg"
     );
     // Direct + any radio keeps the Bluetooth mark.
     assert_eq!(
-        connection_icon_path(Some(&direct), Some(&bt)),
+        connection_icon_path(Some(&direct), None, Some(&bt)),
         "action-icons/bluetooth.svg"
     );
     assert_eq!(
-        connection_icon_path(Some(&direct), Some(&btle)),
+        connection_icon_path(Some(&direct), None, Some(&btle)),
         "action-icons/bluetooth.svg"
     );
     // Unknown transports (no 0x0003 snapshot) keep the old default.
     assert_eq!(
-        connection_icon_path(Some(&direct), None),
+        connection_icon_path(Some(&direct), None, None),
         "action-icons/bluetooth.svg"
     );
     // No route (e.g. a synthetic/placeholder card) falls back to Bluetooth.
     assert_eq!(
-        connection_icon_path(None, None),
+        connection_icon_path(None, None, None),
         "action-icons/bluetooth.svg"
     );
 }
@@ -194,6 +199,7 @@ fn record(kind: DeviceKind, capabilities: Option<Capabilities>) -> DeviceRecord 
         driver_id: None,
         registry_model_id: None,
         route: None,
+        receiver_product_id: None,
         capture_id: None,
         kind,
         capabilities,
@@ -328,4 +334,22 @@ fn unprobed_mouse_falls_back_to_presumed_capabilities() {
 fn unprobed_unknown_device_shows_only_device_tab() {
     let tabs = DetailTab::tabs_for(&record(DeviceKind::Unknown, None));
     assert_eq!(tabs, vec![DetailTab::Device]);
+}
+
+#[test]
+fn route_label_names_a_lightspeed_receiver_as_itself() {
+    // Lightspeed dongles share the Unifying route type; only the receiver's
+    // product id tells them apart.
+    let uni = DeviceRoute::Unifying {
+        receiver_uid: "r".into(),
+        slot: 1,
+    };
+    assert_eq!(
+        super::widgets::route_label(Some(&uni), Some(0xc547)),
+        tr!("device.lightspeed_receiver").to_string()
+    );
+    assert_eq!(
+        super::widgets::route_label(Some(&uni), Some(0xc52b)),
+        tr!("device.unifying_receiver").to_string()
+    );
 }

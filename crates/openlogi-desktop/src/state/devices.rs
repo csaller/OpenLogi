@@ -69,6 +69,10 @@ pub struct DeviceRecord {
     /// Model-level asset registry identity for standalone devices.
     pub registry_model_id: Option<String>,
     pub route: Option<DeviceRoute>,
+    /// USB product id of the receiver [`Self::route`] goes through, so a
+    /// Lightspeed dongle (routed as [`DeviceRoute::Unifying`]) is labelled as
+    /// itself. `None` for direct, raw-HID, camera and placeholder records.
+    pub receiver_product_id: Option<u16>,
     /// OS capture id for cameras (AVFoundation uniqueID / DirectShow path).
     /// Distinct from [`Self::config_key`], which prefers the port-stable USB
     /// serial. `None` for HID++ devices (those open via [`Self::route`]).
@@ -227,6 +231,7 @@ pub(super) fn build_device_list(
                 unit_id,
                 driver_id: None,
                 registry_model_id: None,
+                receiver_product_id: receiver_product_id(route.as_ref(), inv),
                 route,
                 capture_id: None,
                 kind,
@@ -291,6 +296,16 @@ fn apply_custom_names(list: &mut [DeviceRecord], config: &Config) {
 /// StreamCam's `0893`), so a webcam's product render resolves through the same
 /// [`AssetResolver`] as HID++ devices once we synthesize a minimal
 /// [`DeviceModelInfo`] from the USB pid.
+/// The receiver's product id when `route` goes through one; `None` for a
+/// direct attachment, whose inventory "receiver" mirrors the device itself.
+fn receiver_product_id(route: Option<&DeviceRoute>, inv: &DeviceInventory) -> Option<u16> {
+    matches!(
+        route,
+        Some(DeviceRoute::Bolt { .. } | DeviceRoute::Unifying { .. })
+    )
+    .then_some(inv.receiver.product_id)
+}
+
 fn camera_record(camera: &Camera, resolver: &AssetResolver) -> DeviceRecord {
     let config_key = camera.config_key();
     // Cameras are UVC, not HID++, so they carry no `DeviceStableId` route of
@@ -317,6 +332,7 @@ fn camera_record(camera: &Camera, resolver: &AssetResolver) -> DeviceRecord {
         driver_id: None,
         registry_model_id: None,
         route: None,
+        receiver_product_id: None,
         capture_id: Some(camera.unique_id.clone()),
         kind: DeviceKind::Camera,
         capabilities: None,
@@ -394,6 +410,7 @@ fn append_standalone(
             driver_id: Some(device.driver_id.clone()),
             registry_model_id: device.registry_model_id.clone(),
             route,
+            receiver_product_id: None,
             capture_id: None,
             kind: device.kind,
             capabilities: device.capabilities,
@@ -592,6 +609,7 @@ fn offline_record(
         driver_id: identity.driver_id.clone(),
         registry_model_id: identity.registry_model_id.clone(),
         route: None,
+        receiver_product_id: None,
         capture_id: None,
         kind: identity.kind,
         capabilities: Some(identity.capabilities),
@@ -650,6 +668,7 @@ pub(super) fn adopt_transient_record(known: &DeviceRecord, live: DeviceRecord) -
             .registry_model_id
             .or_else(|| known.registry_model_id.clone()),
         route: live.route,
+        receiver_product_id: live.receiver_product_id,
         capture_id: live.capture_id.or_else(|| known.capture_id.clone()),
         kind: if known.kind == DeviceKind::Unknown {
             live.kind
@@ -742,6 +761,7 @@ fn demo_keyboard() -> DeviceRecord {
         driver_id: None,
         registry_model_id: None,
         route: None,
+        receiver_product_id: None,
         capture_id: None,
         kind: DeviceKind::Keyboard,
         capabilities: Some(Capabilities {

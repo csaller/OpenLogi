@@ -402,4 +402,11 @@ impl Action {
             _ => None,
         }
     }
+
+    /// Whether a held gesture swipe bound to this action keeps firing as the
+    /// drag continues (like Options+ volume), rather than once per swipe.
+    #[must_use]
+    pub fn repeats_on_drag(&self) -> bool {
+        matches!(self, Self::VolumeUp | Self::VolumeDown)
+    }
 }

@@ -349,6 +349,7 @@ impl Running {
             }
             WatcherEvent::Camera(active) => {
                 self.orchestrator.lock().await.set_camera_active(active);
+                crate::camera_controls::on_usage_change(active);
             }
             WatcherEvent::App(app) => self.apply_foreground(app).await,
             WatcherEvent::Pointer(context) => self.apply_pointer_context(context).await,

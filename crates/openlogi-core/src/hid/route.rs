@@ -98,14 +98,20 @@ pub fn is_receiver_pid(product_id: u16) -> bool {
     find_receiver(LOGITECH_VENDOR_ID, product_id).is_some()
 }
 
+/// Whether `product_id` is a Lightspeed receiver — addressed like Unifying
+/// ([`DeviceRoute::Unifying`]) but sold and labelled as its own family.
+#[must_use]
+pub fn is_lightspeed_receiver(product_id: u16) -> bool {
+    find_receiver(LOGITECH_VENDOR_ID, product_id)
+        .is_some_and(|receiver| receiver.brand == ReceiverBrand::Lightspeed)
+}
+
 /// Human-readable name for a receiver identified by `product_id`, used to label
 /// it in the inventory. Lightspeed receivers share the Unifying protocol path
 /// but are surfaced under their own name.
 #[must_use]
 pub fn receiver_display_name(product_id: u16) -> &'static str {
-    if find_receiver(LOGITECH_VENDOR_ID, product_id)
-        .is_some_and(|receiver| receiver.brand == ReceiverBrand::Lightspeed)
-    {
+    if is_lightspeed_receiver(product_id) {
         "Lightspeed Receiver"
     } else {
         "Unifying Receiver"

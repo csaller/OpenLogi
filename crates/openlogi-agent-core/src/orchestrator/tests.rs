@@ -81,3 +81,42 @@ fn direct_inventory(serial_number: Option<&str>, unit_id: [u8; 4]) -> DeviceInve
         }],
     }
 }
+
+fn lit(enabled: bool) -> openlogi_core::config::Lighting {
+    openlogi_core::config::Lighting {
+        enabled,
+        color: "0000ff".parse().expect("valid hex"),
+        brightness: 100,
+    }
+}
+
+#[test]
+fn lighting_reassert_targets_online_devices_with_lighting_on() {
+    let mut config = Config::default();
+    config.set_lighting("kbd", lit(true));
+    let mut orch = orchestrator(config);
+    orch.devices = vec![dev("kbd", 1, true)];
+
+    let targets = orch.lighting_reassert_targets();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].1.color, "0000ff".parse().expect("valid hex"));
+}
+
+#[test]
+fn lighting_reassert_skips_off_offline_and_disabled_devices() {
+    // Re-asserting "off" would paint black every tick over the firmware's own
+    // effect; offline and disabled devices get no writes of any kind.
+    let mut config = Config::default();
+    config.set_lighting("off", lit(false));
+    config.set_lighting("offline", lit(true));
+    config.set_lighting("disabled", lit(true));
+    config.set_device_enabled("disabled", false);
+    let mut orch = orchestrator(config);
+    orch.devices = vec![
+        dev("off", 1, true),
+        dev("offline", 2, false),
+        dev("disabled", 3, true),
+    ];
+
+    assert!(orch.lighting_reassert_targets().is_empty());
+}

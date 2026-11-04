@@ -268,12 +268,13 @@ fn transport_glance(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
     } else {
         connection_icon_path(
             record.route.as_ref(),
+            record.receiver_product_id,
             record.model_info.as_ref().map(|model| &model.transports),
         )
     };
     let color: Hsla = match path {
         "action-icons/bluetooth.svg" => rgb(theme::ACCENT_BLUE).into(),
-        "action-icons/bolt.svg" | "action-icons/unifying.svg" => {
+        "action-icons/bolt.svg" | "action-icons/unifying.svg" | "action-icons/lightspeed.svg" => {
             rgb(theme::STATUS_CONNECTED).into()
         }
         _ => pal.text_muted,
@@ -498,6 +499,7 @@ fn connection_view(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
                 } else {
                     connection_icon_path(
                         record.route.as_ref(),
+                        record.receiver_product_id,
                         record.model_info.as_ref().map(|model| &model.transports),
                     )
                 })
@@ -508,7 +510,7 @@ fn connection_view(record: &DeviceRecord, pal: Palette) -> impl IntoElement {
 }
 
 fn connection_summary(record: &DeviceRecord) -> String {
-    let route = route_label(record.route.as_ref());
+    let route = route_label(record.route.as_ref(), record.receiver_product_id);
     if matches!(
         record.route,
         Some(DeviceRoute::Bolt { .. } | DeviceRoute::Unifying { .. })
@@ -580,10 +582,17 @@ fn device_image(
 /// normally attached.
 pub(super) fn connection_icon_path(
     route: Option<&DeviceRoute>,
+    receiver_product_id: Option<u16>,
     transports: Option<&DeviceTransports>,
 ) -> &'static str {
     match route {
         Some(DeviceRoute::Bolt { .. }) => "action-icons/bolt.svg",
+        // Lightspeed shares the Unifying route; the receiver pid tells them apart.
+        Some(DeviceRoute::Unifying { .. })
+            if receiver_product_id.is_some_and(openlogi_core::hid::is_lightspeed_receiver) =>
+        {
+            "action-icons/lightspeed.svg"
+        }
         Some(DeviceRoute::Unifying { .. }) => "action-icons/unifying.svg",
         // Explicit arms (not `_`) so a new DeviceRoute variant trips the
         // compiler here, matching the exhaustive sibling `route_label`.

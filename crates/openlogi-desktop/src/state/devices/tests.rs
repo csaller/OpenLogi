@@ -165,6 +165,7 @@ fn online_record(key: &str) -> DeviceRecord {
         driver_id: None,
         registry_model_id: None,
         route: None,
+        receiver_product_id: None,
         capture_id: None,
         kind: DeviceKind::Mouse,
         capabilities: Some(Capabilities::presumed_from_kind(DeviceKind::Mouse)),

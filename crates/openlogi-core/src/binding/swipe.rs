@@ -18,6 +18,9 @@ pub const GESTURE_SWIPE_DEADZONE: i32 = 40;
 /// cursor happened to be moving. Shared by both gesture paths (the HID++ thumb
 /// pad and the OS-hook Back/Forward buttons).
 pub const GESTURE_HOLD_FOR_SWIPE: std::time::Duration = std::time::Duration::from_millis(160);
+/// Further travel along a committed swipe's axis that emits one
+/// [`SwipeAccumulator::repeat`] step — how far to drag per volume notch.
+pub const GESTURE_REPEAT_STEP: i32 = 50;
 
 /// Classify the *running* raw-XY travel of a held gesture button into a
 /// directional swipe, the instant it commits — or `None` while it's still too
@@ -91,6 +94,12 @@ pub struct SwipeAccumulator {
     /// Set once a direction has committed this hold, so it fires exactly once
     /// and the release isn't then also read as a click.
     fired: bool,
+    /// The direction that committed this hold, which [`Self::repeat`] steps
+    /// along; `None` until a swipe fires.
+    committed: Option<GestureDirection>,
+    /// Signed travel along the committed axis since the last repeat step,
+    /// positive toward the committed direction.
+    repeat_travel: i32,
 }
 
 impl SwipeAccumulator {
@@ -100,6 +109,8 @@ impl SwipeAccumulator {
         self.dx = 0;
         self.dy = 0;
         self.fired = false;
+        self.committed = None;
+        self.repeat_travel = 0;
     }
 
     /// Whether a hold is in progress (between [`Self::begin`] and [`Self::end`]),
@@ -124,9 +135,36 @@ impl SwipeAccumulator {
             .is_some_and(|t| t.elapsed() >= GESTURE_HOLD_FOR_SWIPE);
         if held_long_enough && let Some(dir) = detect_swipe(self.dx, self.dy) {
             self.fired = true;
+            self.committed = Some(dir);
             return Some(dir);
         }
         None
+    }
+
+    /// Feed a delta that arrives after this hold's swipe committed. Returns a
+    /// direction each time travel along the committed axis passes another
+    /// [`GESTURE_REPEAT_STEP`]: the committed direction when dragging onward,
+    /// its opposite when dragging back — so a held swipe works like a slider.
+    /// Callers decide whether the bound action repeats at all.
+    pub fn repeat(&mut self, dx: i32, dy: i32) -> Option<GestureDirection> {
+        let committed = self.committed.filter(|_| self.held_since.is_some())?;
+        let (along, opposite) = match committed {
+            GestureDirection::Up => (-dy, GestureDirection::Down),
+            GestureDirection::Down => (dy, GestureDirection::Up),
+            GestureDirection::Left => (-dx, GestureDirection::Right),
+            GestureDirection::Right => (dx, GestureDirection::Left),
+            GestureDirection::Click => return None,
+        };
+        self.repeat_travel = self.repeat_travel.saturating_add(along);
+        if self.repeat_travel >= GESTURE_REPEAT_STEP {
+            self.repeat_travel -= GESTURE_REPEAT_STEP;
+            Some(committed)
+        } else if self.repeat_travel <= -GESTURE_REPEAT_STEP {
+            self.repeat_travel += GESTURE_REPEAT_STEP;
+            Some(opposite)
+        } else {
+            None
+        }
     }
 
     /// End the current hold. Returns `true` when an in-progress hold ended
@@ -154,6 +192,36 @@ impl SwipeAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Repeat after commit ───────────────────────────────────────────────────
+
+    fn committed_up() -> SwipeAccumulator {
+        let mut acc = SwipeAccumulator::default();
+        acc.begin();
+        acc.backdate_hold_for_test();
+        assert_eq!(acc.accumulate(0, -GESTURE_SWIPE_THRESHOLD), Some(GestureDirection::Up));
+        acc
+    }
+
+    #[test]
+    fn repeat_steps_along_the_committed_direction_and_back() {
+        let mut acc = committed_up();
+        assert_eq!(acc.repeat(0, -(GESTURE_REPEAT_STEP - 1)), None);
+        assert_eq!(acc.repeat(0, -1), Some(GestureDirection::Up));
+        // Dragging back past a full step reverses, like a slider.
+        assert_eq!(acc.repeat(0, GESTURE_REPEAT_STEP), Some(GestureDirection::Down));
+    }
+
+    #[test]
+    fn repeat_is_silent_before_a_commit_and_after_release() {
+        let mut acc = SwipeAccumulator::default();
+        acc.begin();
+        assert_eq!(acc.repeat(0, -1000), None);
+
+        let mut acc = committed_up();
+        acc.end();
+        assert_eq!(acc.repeat(0, -1000), None);
+    }
 
     // ── Gesture classification ────────────────────────────────────────────────
 

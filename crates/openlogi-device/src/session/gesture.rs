@@ -53,6 +53,10 @@ pub enum CapturedInput {
     /// tagged with the source control so dispatch resolves it against that
     /// button's own direction map.
     Gesture(ButtonId, GestureDirection),
+    /// Further travel after a [`Self::Gesture`] swipe committed, one step per
+    /// [`GESTURE_REPEAT_STEP`](openlogi_core::binding::GESTURE_REPEAT_STEP);
+    /// dispatch fires it only for actions that repeat on drag.
+    GestureRepeat(ButtonId, GestureDirection),
     /// A diverted button's physical down edge.
     ButtonDown(ButtonId),
     /// Thumb-wheel rotation to re-synthesise on the configured scroll axis.
@@ -119,12 +123,21 @@ pub const DIVERTABLE_STANDARD_BUTTONS: [(u16, ButtonId); 9] = {
 };
 
 /// HID++ gesture sources: the `0x1b04` control ID and the [`ButtonId`] it
-/// delivers — the dedicated gesture button on most MX mice, and the Haptic
-/// Sense Panel on MX Master 4 (two distinct physical controls). Each source in
-/// gesture mode is diverted with raw-XY; one with a non-default single binding
-/// instead is plain-diverted like a standard button.
-pub const GESTURE_SOURCE_BUTTONS: [(u16, ButtonId); 2] = [
+/// delivers — the dedicated gesture button on most MX mice (reported under
+/// either [`reprog_controls::GESTURE_BUTTON_CID`] or, on multi-host mice like
+/// the M720 Triathlon, [`reprog_controls::GESTURE_BUTTON_MULTIPLATFORM_CID`]),
+/// and the Haptic Sense Panel on MX Master 4 (a distinct physical control). A
+/// device reports at most one of the two gesture-button CIDs, so both can map
+/// to [`ButtonId::GestureButton`] without ever double-arming one physical
+/// button. Each source in gesture mode is diverted with raw-XY; one with a
+/// non-default single binding instead is plain-diverted like a standard
+/// button.
+pub const GESTURE_SOURCE_BUTTONS: [(u16, ButtonId); 3] = [
     (reprog_controls::GESTURE_BUTTON_CID, ButtonId::GestureButton),
+    (
+        reprog_controls::GESTURE_BUTTON_MULTIPLATFORM_CID,
+        ButtonId::GestureButton,
+    ),
     (reprog_controls::HAPTIC_PANEL_CID, ButtonId::HapticPanel),
 ];
 

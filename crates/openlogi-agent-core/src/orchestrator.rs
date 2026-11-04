@@ -622,6 +622,34 @@ impl Orchestrator {
         self.reapply_all_next_refresh = true;
     }
 
+    /// Re-write the configured colour on every online device with lighting on.
+    /// Called on a timer: G-series keyboards take their LEDs back ~20 s after a
+    /// volatile write while staying connected (#1000), so no arrival or wake
+    /// event ever fires to trigger [`Self::reapply_volatile_settings`].
+    pub fn reassert_lighting(&self) {
+        for (route, lighting) in self.lighting_reassert_targets() {
+            crate::hardware::set_lighting_in_background(self.shared.device(&route), &lighting);
+        }
+    }
+
+    /// Devices [`Self::reassert_lighting`] writes to, with the colour each wants.
+    fn lighting_reassert_targets(&self) -> Vec<(DeviceRoute, openlogi_core::config::Lighting)> {
+        self.devices
+            .iter()
+            .filter(|dev| dev.online && self.config.device_enabled(&dev.config_key))
+            .filter_map(|dev| {
+                let route = dev.route.clone()?;
+                let lighting = self
+                    .config
+                    .devices
+                    .get(dev.config_key.as_str())?
+                    .effective_lighting(&stable_id(dev).route_key())
+                    .filter(|l| l.enabled)?;
+                Some((route, lighting.clone()))
+            })
+            .collect()
+    }
+
     /// Push the persisted volatile settings (lighting, sensor DPI, SmartShift,
     /// native wheel mode) to one device. Mouse settings run on one background
     /// thread and one HID++ channel so concurrent multi-open of the same
