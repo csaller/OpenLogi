@@ -19,7 +19,7 @@ use gpui::{
     Subscription, Task, Window, div, px,
 };
 use gpui_kit::component::{WindowExt as _, dialog::DialogButtonProps, input::InputState, v_flex};
-use openlogi_camera::{AutoToggle, CameraControl, ControlRange};
+use openlogi_camera::{AutoToggle, CameraControl, ControlRange, SavedSettings};
 use openlogi_core::config::CameraControls;
 use tracing::debug;
 
@@ -33,7 +33,7 @@ mod hardware;
 mod rows;
 #[cfg(test)]
 mod tests;
-use hardware::{Cancel, Hardware, Loaded, Saved, SystemUvc, Uvc};
+use hardware::{Cancel, Hardware, Loaded, SystemUvc, Uvc};
 use rows::{
     control_label, control_row, from_slider, profiles_row, reset_button, section_indices, to_slider,
 };
@@ -195,16 +195,17 @@ impl CameraControlsPanel {
         AppState::update(cx, |state, _| {
             state.migrate_legacy_camera_key(key, uid);
         });
-        let saved = AppState::try_read(cx).map_or_else(Saved::default, |state| Saved {
-            autos: AutoToggle::ALL
-                .into_iter()
-                .filter_map(|t| state.camera_auto(key, t).map(|on| (t, on)))
-                .collect(),
-            values: CameraControl::ALL
-                .into_iter()
-                .filter_map(|c| state.camera_control(key, c).map(|v| (c, v)))
-                .collect(),
-        });
+        let saved =
+            AppState::try_read(cx).map_or_else(SavedSettings::default, |state| SavedSettings {
+                autos: AutoToggle::ALL
+                    .into_iter()
+                    .filter_map(|t| state.camera_auto(key, t).map(|on| (t, on)))
+                    .collect(),
+                values: CameraControl::ALL
+                    .into_iter()
+                    .filter_map(|c| state.camera_control(key, c).map(|v| (c, v)))
+                    .collect(),
+            });
         let hw = self.hw.clone();
         let read_uid = uid.to_string();
         let cancel = Cancel::default();

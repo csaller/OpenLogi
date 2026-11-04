@@ -317,7 +317,7 @@ fn a_canceled_load_does_not_write_its_saved_settings() {
     let uvc = Arc::new(FakeUvc::default());
     uvc.queue(brio(100, 500, false));
     let hw = Hardware::new(uvc.clone());
-    let saved = Saved {
+    let saved = SavedSettings {
         autos: Vec::new(),
         values: vec![(CameraControl::Brightness, 200)],
     };
