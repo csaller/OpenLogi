@@ -488,4 +488,13 @@ impl Action {
     pub fn is_held(&self) -> bool {
         self.held_chord().is_some() || matches!(self, Self::DpiShift | Self::GShift)
     }
+
+    /// Whether a held motion keeps firing this action for every stretch of
+    /// travel, rather than once per gesture. Only volume does: it works like a
+    /// slider, where every other action is a discrete step that would overshoot.
+    /// The thumb wheel and the held gesture button's swipe both ask this.
+    #[must_use]
+    pub fn repeats_with_distance(&self) -> bool {
+        matches!(self, Self::VolumeUp | Self::VolumeDown)
+    }
 }

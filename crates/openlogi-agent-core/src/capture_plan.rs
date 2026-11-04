@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use openlogi_core::binding::{
-    Action, Binding, ButtonId, GamingLayout, GestureDirection, default_binding,
+    Action, Binding, ButtonId, GamingLayout, GestureDirection, RepeatDistances, default_binding,
 };
 use openlogi_core::bindings::{button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for};
 use openlogi_core::config::{Config, MomentumScrolling, OnboardMemory, ThumbwheelSensitivity};
@@ -409,6 +409,7 @@ pub fn plan_for_device(
             .is_some_and(|binding| binding.click_action() != default_binding(*button))
     });
     let thumbwheel_sensitivity = config.thumbwheel_sensitivity(config_key);
+    let gesture_repeat = gesture_repeat_for(&gesture_bindings, &side_gesture_bindings);
     DeviceCapturePlan {
         target: CaptureTarget {
             physical_key,
@@ -422,6 +423,7 @@ pub fn plan_for_device(
                     .map(|(cid, _)| cid)
                     .collect(),
                 divert_gesture_buttons,
+                gesture_repeat,
                 divert_buttons,
                 divert_wheel_buttons,
                 // Needs the device's wheel capabilities and the settings of
@@ -443,6 +445,21 @@ pub fn plan_for_device(
             shift_bindings: shift_bindings_for(config, config_key),
         },
     }
+}
+
+/// The swipe repeat distance each gesture button's bound actions want; buttons
+/// that keep the default are left out. Dispatch resolves a button's swipes from
+/// `gesture` first, so the side maps go in first and a button in both ends up
+/// with the main map's.
+fn gesture_repeat_for(
+    gesture: &BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
+    side: &BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
+) -> BTreeMap<ButtonId, RepeatDistances> {
+    side.iter()
+        .chain(gesture)
+        .map(|(button, map)| (*button, RepeatDistances::for_bindings(map)))
+        .filter(|(_, distances)| !distances.is_default())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1055,6 +1072,36 @@ mod tests {
                 .contains(&(GESTURE_BUTTON_CID, ButtonId::GestureButton)),
             "a single-bound gesture button must be plain-diverted, or the binding can never fire"
         );
+    }
+
+    #[test]
+    fn a_volume_swipe_asks_the_session_for_a_finer_repeat() {
+        let mut cfg = Config::default();
+        cfg.set_gesture_mode("2b042", ButtonId::GestureButton, true);
+        cfg.set_gesture_direction(
+            "2b042",
+            ButtonId::GestureButton,
+            GestureDirection::Up,
+            Action::VolumeUp,
+        );
+
+        let plan = plan_for_device(&cfg, "2b042", route(), None, 0, true);
+
+        let repeat = &plan.target.spec.gesture_repeat;
+        assert!(
+            !repeat[&ButtonId::GestureButton].is_default(),
+            "a volume direction steps by the swipe threshold, not the desktop-switch distance"
+        );
+    }
+
+    #[test]
+    fn default_gestures_leave_the_repeat_distance_alone() {
+        let mut cfg = Config::default();
+        cfg.set_gesture_mode("2b042", ButtonId::GestureButton, true);
+
+        let plan = plan_for_device(&cfg, "2b042", route(), None, 0, true);
+
+        assert!(plan.target.spec.gesture_repeat.is_empty());
     }
 
     #[test]
