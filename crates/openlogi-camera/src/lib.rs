@@ -32,7 +32,10 @@ use openlogi_device_registry::camera::find_unnamed_camera;
 use serde::Serialize;
 
 mod controls;
-pub use controls::{AutoState, AutoToggle, CameraControl, CameraState, ControlError, ControlRange};
+pub use controls::{
+    AutoState, AutoToggle, CameraControl, CameraState, ControlError, ControlRange, Reapply,
+    SavedSettings,
+};
 
 mod capture_types;
 pub use capture_types::{CaptureError, Frame};

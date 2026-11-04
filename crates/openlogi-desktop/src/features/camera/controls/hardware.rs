@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use openlogi_camera::{AutoToggle, CameraControl, CameraState, ControlError};
+use openlogi_camera::{
+    AutoToggle, CameraControl, CameraState, ControlError, Reapply, SavedSettings,
+};
 use tracing::debug;
-
-use crate::ui::commit_slider::SliderRange;
 
 /// The UVC calls the panel makes. `Send + Sync` because the initial read runs
 /// on the background executor.
@@ -113,30 +113,6 @@ impl Drop for Cancel {
     }
 }
 
-/// The settings saved for a camera, gathered on the UI thread so the load can
-/// run without touching `AppState`.
-#[derive(Default)]
-pub(super) struct Saved {
-    pub(super) autos: Vec<(AutoToggle, bool)>,
-    pub(super) values: Vec<(CameraControl, i32)>,
-}
-
-impl Saved {
-    fn auto(&self, toggle: AutoToggle) -> Option<bool> {
-        self.autos
-            .iter()
-            .find(|(t, _)| *t == toggle)
-            .map(|(_, on)| *on)
-    }
-
-    fn value(&self, control: CameraControl) -> Option<i32> {
-        self.values
-            .iter()
-            .find(|(c, _)| *c == control)
-            .map(|(_, v)| *v)
-    }
-}
-
 /// What a background load publishes to the panel.
 pub(super) struct Loaded {
     /// The state to build rows from — ranges and defaults as the device
@@ -152,16 +128,20 @@ pub(super) struct Loaded {
 /// Read the camera and re-assert the saved auto/value differences in one
 /// batched device-open. Blocking: runs on the background executor.
 ///
-/// Saved auto states win over the device's, then saved values win for
-/// controls whose auto is off. `apply_settings` isn't atomic — it writes the
-/// auto mode, then the value — so a rejected batch can leave the hardware
-/// between states and the pre-write snapshot untrustworthy: the device is
-/// re-read, and a re-read that also fails yields no state rather than the stale
-/// pre-write one.
+/// What gets re-asserted is [`CameraState::reconcile`]'s call. `apply_settings`
+/// isn't atomic — it writes the auto mode, then the value — so a rejected batch
+/// can leave the hardware between states and the pre-write snapshot
+/// untrustworthy: the device is re-read, and a re-read that also fails yields
+/// no state rather than the stale pre-write one.
 ///
 /// A load whose `canceled` flag is set by the time it would write returns
 /// without writing; nothing reads its result.
-pub(super) fn load(hw: &Hardware, uid: &str, saved: &Saved, canceled: &AtomicBool) -> Loaded {
+pub(super) fn load(
+    hw: &Hardware,
+    uid: &str,
+    saved: &SavedSettings,
+    canceled: &AtomicBool,
+) -> Loaded {
     let uvc = hw.uvc.as_ref();
     let camera = hw.camera_lock(uid);
     let _loading = camera.lock().unwrap_or_else(PoisonError::into_inner);
@@ -174,27 +154,10 @@ pub(super) fn load(hw: &Hardware, uid: &str, saved: &Saved, canceled: &AtomicBoo
     };
     let read = state.clone();
 
-    let mut apply_autos = Vec::new();
-    for (toggle, st) in &mut state.autos {
-        let on = saved.auto(*toggle).unwrap_or(st.current);
-        if on != st.current {
-            apply_autos.push((*toggle, on));
-        }
-        st.current = on;
-    }
-    let mut apply_values = Vec::new();
-    for (control, range) in &mut state.controls {
-        let saved_value = saved.value(*control);
-        let initial =
-            SliderRange::new(range.min, range.max).clamp(saved_value.unwrap_or(range.current));
-        let auto_on = control
-            .auto_toggle()
-            .is_some_and(|toggle| state.autos.iter().any(|(t, st)| *t == toggle && st.current));
-        if saved_value.is_some_and(|v| v != range.current) && !auto_on {
-            apply_values.push((*control, initial));
-        }
-        range.current = initial;
-    }
+    let Reapply {
+        autos: apply_autos,
+        values: apply_values,
+    } = state.reconcile(saved);
 
     if apply_autos.is_empty() && apply_values.is_empty() {
         return Loaded {
