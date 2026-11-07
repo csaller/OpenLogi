@@ -1,0 +1,18 @@
+# Owner: openlogi_camera::CameraState::reconcile — how a camera's saved auto
+# modes and values are brought back onto the device: saved autos win, saved
+# values are clamped to the device range, and a control left to its auto mode
+# is not written. One decision, so the GUI camera page and the agent's
+# session-start re-apply cannot drift apart.
+id: camera-saved-reconcile-owner
+language: rust
+severity: error
+message: Which saved camera settings get written is decided by openlogi_camera::CameraState::reconcile; do not re-derive the auto-mode gating from auto_toggle().
+note: |
+  The GUI's hardware::load and the agent's re-apply each carried their own copy
+  of this diff. See "Single source of truth" in AGENTS.md.
+files:
+  - crates/openlogi-agent/**/*.rs
+  - crates/openlogi-agent-core/**/*.rs
+  - crates/openlogi-desktop/**/*.rs
+rule:
+  pattern: $CONTROL.auto_toggle().is_some_and($$$ARGS)
