@@ -28,12 +28,13 @@ mod arm;
 pub(super) mod main_wheel;
 mod spy;
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU8;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hidpp::feature::hires_wheel::{self, HiResWheelEvent};
 use hidpp::protocol::v20;
-use openlogi_core::binding::{ButtonId, GestureDirection};
+use openlogi_core::binding::{ButtonId, GestureDirection, RepeatDistances};
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -190,6 +191,10 @@ pub struct CaptureSpec {
     /// Standard-button CIDs requested as raw-XY gesture sources. A control is
     /// armed only when its HID++ capability flags advertise raw-XY support.
     pub divert_gesture_buttons: Vec<(u16, ButtonId)>,
+    /// How far a held swipe travels before it repeats, for each gesture button
+    /// that binds an action wanting a finer step than the default (volume).
+    /// A button not listed repeats at the default distance.
+    pub gesture_repeat: BTreeMap<ButtonId, RepeatDistances>,
     /// Buttons to divert as plain presses (no raw-XY): the
     /// [`DIVERTABLE_STANDARD_BUTTONS`] and non-gesturing
     /// [`GESTURE_SOURCE_BUTTONS`] whose binding leaves the default.
@@ -264,9 +269,10 @@ struct GestureCapture {
 
 impl GestureCapture {
     fn new(armed: ArmedControls) -> Self {
+        let accum = CaptureAccum::with_repeat(armed.gesture_repeat.clone());
         Self {
             armed,
-            accum: Arc::default(),
+            accum: Arc::new(Mutex::new(accum)),
             thumb_status: Arc::new(Mutex::new(RotationStatus::Inactive)),
             spy_edges: Arc::default(),
         }
@@ -400,7 +406,8 @@ impl ArmedCapture for GestureCapture {
     }
 
     fn reset_input_state(&self) {
-        *self.accum.lock().unwrap_or_else(PoisonError::into_inner) = CaptureAccum::default();
+        *self.accum.lock().unwrap_or_else(PoisonError::into_inner) =
+            CaptureAccum::with_repeat(self.armed.gesture_repeat.clone());
         // A power cycle ends any roll in progress; carrying it over would
         // swallow the first tap after the reconnect.
         *self

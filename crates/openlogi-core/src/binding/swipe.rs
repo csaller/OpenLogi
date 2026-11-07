@@ -3,9 +3,10 @@
 //! shared by both gesture-capture paths. This is input processing, distinct
 //! from the `Action` vocabulary the parent [`binding`](super) module defines.
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
-use super::GestureDirection;
+use super::{Action, GestureDirection};
 
 /// Minimum dominant-axis travel (raw-XY units) before a held gesture commits to
 /// a direction. Tuned to match Logitech Options+'s responsiveness.
@@ -33,6 +34,43 @@ pub const GESTURE_REARM_PAUSE: std::time::Duration = std::time::Duration::from_m
 /// cursor happened to be moving. Shared by both gesture paths (the HID++ thumb
 /// pad and the OS-hook Back/Forward buttons).
 pub const GESTURE_HOLD_FOR_SWIPE: std::time::Duration = std::time::Duration::from_millis(160);
+
+/// How far a held swipe travels before it fires again, per direction.
+///
+/// [`GESTURE_REPEAT_DISTANCE`] suits the discrete steps a swipe usually runs
+/// (a desktop switch overshoots easily). An action that repeats with distance
+/// ([`Action::repeats_with_distance`]) is a slider instead, so it steps every
+/// [`GESTURE_SWIPE_THRESHOLD`] of travel: the smallest step a swipe can make.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepeatDistances(BTreeMap<GestureDirection, i32>);
+
+impl RepeatDistances {
+    /// The distances a button's direction map wants. Directions bound to
+    /// ordinary actions keep the default and are not stored.
+    #[must_use]
+    pub fn for_bindings(bindings: &BTreeMap<GestureDirection, Action>) -> Self {
+        Self(
+            bindings
+                .iter()
+                .filter(|(_, action)| action.repeats_with_distance())
+                .map(|(direction, _)| (*direction, GESTURE_SWIPE_THRESHOLD))
+                .collect(),
+        )
+    }
+
+    /// Whether every direction keeps the default, so nothing needs carrying.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn get(&self, direction: GestureDirection) -> i32 {
+        self.0
+            .get(&direction)
+            .copied()
+            .unwrap_or(GESTURE_REPEAT_DISTANCE)
+    }
+}
 
 /// Classify the *running* raw-XY travel of a held gesture button into a
 /// directional swipe, the instant it commits — or `None` while it's still too
@@ -111,16 +149,28 @@ pub struct SwipeAccumulator {
     /// left...) the way Options+ does.
     last: Option<GestureDirection>,
     /// Net travel continuing `last` since it committed; fires `last` again at
-    /// [`GESTURE_REPEAT_DISTANCE`].
+    /// its repeat distance ([`RepeatDistances`]).
     repeat: i32,
     /// Signed sideways drift accompanying `repeat`, held to the same
     /// straightness rule as a fresh swipe so a diagonal can't repeat.
     repeat_cross: i32,
     /// When the last motion arrived, to detect the pause that ends a stroke.
     moved_at: Option<Instant>,
+    /// Per-direction repeat distance for this hold's button; kept across
+    /// [`Self::begin`], which only resets the hold's own state.
+    repeat_distances: RepeatDistances,
 }
 
 impl SwipeAccumulator {
+    /// An accumulator whose holds repeat at `repeat_distances`.
+    #[must_use]
+    pub fn with_repeat_distances(repeat_distances: RepeatDistances) -> Self {
+        Self {
+            repeat_distances,
+            ..Self::default()
+        }
+    }
+
     /// Begin a fresh hold, resetting the travel accumulator and commit state.
     pub fn begin(&mut self) {
         self.held_since = Some(Instant::now());
@@ -165,8 +215,9 @@ impl SwipeAccumulator {
         }
         self.moved_at = Some(now);
         if let Some(dir) = self.last {
+            let repeat_distance = self.repeat_distances.get(dir);
             // Net travel continuing the committed way fires it again every
-            // GESTURE_REPEAT_DISTANCE, so a continuous motion keeps stepping.
+            // repeat distance, so a continuous motion keeps stepping.
             // Backtracking takes back that progress and its drift alike, so a
             // wobble never repeats and a corrected stroke isn't held to drift
             // it has undone.
@@ -186,12 +237,12 @@ impl SwipeAccumulator {
                 // committed direction's frame (`Right` = along it).
                 let straight =
                     detect_swipe(self.repeat, self.repeat_cross) == Some(GestureDirection::Right);
-                if self.repeat >= GESTURE_REPEAT_DISTANCE && straight {
+                if self.repeat >= repeat_distance && straight {
                     // Carry the excess, so a report spanning two repeat
                     // distances fires again on the next report. The excess is
                     // the stroke's tail, so it keeps the tail's drift: this
                     // report's share first, then earlier travel's.
-                    let excess = self.repeat - GESTURE_REPEAT_DISTANCE;
+                    let excess = self.repeat - repeat_distance;
                     let tail = excess.min(a);
                     let mut carried = i64::from(c) * i64::from(tail) / i64::from(a);
                     if excess > a && earlier > 0 {
@@ -533,6 +584,72 @@ mod tests {
             Some(GestureDirection::Right)
         );
         assert_eq!(acc.accumulate(GESTURE_REPEAT_DISTANCE - 1, 0), None);
+    }
+
+    #[test]
+    fn repeat_distances_shorten_only_the_directions_bound_to_volume() {
+        let bindings = BTreeMap::from([
+            (GestureDirection::Up, Action::VolumeUp),
+            (GestureDirection::Down, Action::VolumeDown),
+            (GestureDirection::Left, Action::PrevTrack),
+        ]);
+        let distances = RepeatDistances::for_bindings(&bindings);
+
+        assert_eq!(distances.get(GestureDirection::Up), GESTURE_SWIPE_THRESHOLD);
+        assert_eq!(
+            distances.get(GestureDirection::Down),
+            GESTURE_SWIPE_THRESHOLD
+        );
+        assert_eq!(
+            distances.get(GestureDirection::Left),
+            GESTURE_REPEAT_DISTANCE
+        );
+        assert_eq!(
+            distances.get(GestureDirection::Right),
+            GESTURE_REPEAT_DISTANCE
+        );
+        assert!(RepeatDistances::default().is_default());
+        assert!(!distances.is_default());
+    }
+
+    #[test]
+    fn a_volume_direction_steps_every_threshold_and_reverses_like_a_slider() {
+        let volume = BTreeMap::from([(GestureDirection::Up, Action::VolumeUp)]);
+        let mut acc =
+            SwipeAccumulator::with_repeat_distances(RepeatDistances::for_bindings(&volume));
+        acc.begin();
+        acc.backdate_hold_for_test();
+        assert_eq!(
+            acc.accumulate(0, -(GESTURE_SWIPE_THRESHOLD + 10)),
+            Some(GestureDirection::Up)
+        );
+
+        // One more threshold of travel is one more step, and no sooner.
+        assert_eq!(acc.accumulate(0, -(GESTURE_SWIPE_THRESHOLD - 1)), None);
+        assert_eq!(acc.accumulate(0, -1), Some(GestureDirection::Up));
+        // Dragging back a threshold is a step the other way.
+        assert_eq!(
+            acc.accumulate(0, GESTURE_SWIPE_THRESHOLD + 10),
+            Some(GestureDirection::Down)
+        );
+    }
+
+    #[test]
+    fn a_default_direction_still_waits_for_the_repeat_distance() {
+        // The same swipe, bound to nothing that repeats with distance.
+        let mut acc = SwipeAccumulator::default();
+        acc.begin();
+        acc.backdate_hold_for_test();
+        assert_eq!(
+            acc.accumulate(0, -(GESTURE_SWIPE_THRESHOLD + 10)),
+            Some(GestureDirection::Up)
+        );
+
+        assert_eq!(acc.accumulate(0, -GESTURE_SWIPE_THRESHOLD), None);
+        assert_eq!(
+            acc.accumulate(0, -(GESTURE_REPEAT_DISTANCE - GESTURE_SWIPE_THRESHOLD)),
+            Some(GestureDirection::Up)
+        );
     }
 
     #[test]
